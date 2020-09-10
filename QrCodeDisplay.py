@@ -1,4 +1,6 @@
-import pygame
+# import pygame
+import cv2
+import numpy as np
 from copy import deepcopy
 from QrCode import QrCode
 from Polynomials import Polynomials
@@ -72,33 +74,43 @@ class QrCodeDraw:
         self.matrix_copy = []
 
     def draw(self):
-        pygame.init()
-        screen = pygame.display.set_mode((self.width_in_pixels, self.height_in_pixels))
-        clock = pygame.time.Clock()
+        # pygame.init()
+        # screen = pygame.display.set_mode((self.width_in_pixels, self.height_in_pixels))
+        # clock = pygame.time.Clock()
+
         self.create_qr_code()
         ecc_lookup = {0: 'L', 1: 'M', 2: 'Q', 3: 'H'}
-        pygame.display.set_caption(f"QR Code Generator, ver {self.qr_code.minimum_version},"
-                                   f" ecc {ecc_lookup[self.qr_code.error_correction_level]},"
-                                   f" mask {self.qr_code.mask_pattern}")
 
-        running = True
+        test = np.ones([self.height_in_modules + 8, self.width_in_modules + 8]) - np.array(self.matrix)
+        r = cv2.resize(test, (self.width_in_pixels, self.height_in_pixels), interpolation=cv2.INTER_AREA)
+        cv2.imshow(f"QR Code Generator, ver {self.qr_code.minimum_version},"
+                   f" ecc {ecc_lookup[self.qr_code.error_correction_level]},"
+                   f" mask {self.qr_code.mask_pattern}", r)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-        while running:
-            clock.tick(60)
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
+        # pygame.display.set_caption(f"QR Code Generator, ver {self.qr_code.minimum_version},"
+        #                            f" ecc {ecc_lookup[self.qr_code.error_correction_level]},"
+        #                            f" mask {self.qr_code.mask_pattern}")
 
-                if event.type == pygame.KEYDOWN:  # Change game speed with number keys
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
-            screen.fill((255, 255, 255))  # draw background
-
-            self.draw_qr_code(screen)
-            pygame.display.update()
-
-        pygame.quit()
-        quit()
+        # running = True
+        #
+        # while running:
+        #     clock.tick(60)
+        #     for event in pygame.event.get():
+        #         if event.type == pygame.QUIT:
+        #             running = False
+        #
+        #         if event.type == pygame.KEYDOWN:  # Change game speed with number keys
+        #             if event.key == pygame.K_ESCAPE:
+        #                 running = False
+        #     screen.fill((255, 255, 255))  # draw background
+        #
+        #     self.draw_qr_code(screen)
+        #     pygame.display.update()
+        #
+        # pygame.quit()
+        # quit()
 
     def create_qr_code(self):
         self.create_finder_patterns()
@@ -518,23 +530,23 @@ class QrCodeDraw:
             self.matrix[y + 2][-7:] = pattern2
             self.matrix[y + 3][-7:] = pattern1
 
-    def draw_qr_code(self, screen):
-        width_in_modules = self.width_in_modules + 8
-        height_in_modules = self.height_in_modules + 8
-        pixels_per_module = min(self.width_in_pixels // width_in_modules,
-                                self.height_in_pixels // height_in_modules)
-
-        for y in range(height_in_modules):
-            for x in range(width_in_modules):
-                col = (0, 0, 0) if self.matrix[y][x] == 1 else (255, 255, 255) if self.matrix[y][x] == 0 else\
-                    (0, 0, 255) if self.matrix[y][x] == 4 else (255, 0, 0) if self.matrix[y][x] == 3 else\
-                    (0, 255, 0) if self.matrix[y][x] == 2 else (128, 128, 128)
-                pygame.draw.rect(screen, col, (x * pixels_per_module, y * pixels_per_module,
-                                               (x + 1) * pixels_per_module, (y + 1) * pixels_per_module))
-        pygame.draw.rect(screen, (255, 255, 255), (width_in_modules * pixels_per_module, 0,
-                                                   self.width_in_pixels, self.height_in_pixels))
-        pygame.draw.rect(screen, (255, 255, 255), (0, height_in_modules * pixels_per_module,
-                                                   self.width_in_pixels, self.height_in_pixels))
+    # def draw_qr_code(self, screen):
+    #     width_in_modules = self.width_in_modules + 8
+    #     height_in_modules = self.height_in_modules + 8
+    #     pixels_per_module = min(self.width_in_pixels // width_in_modules,
+    #                             self.height_in_pixels // height_in_modules)
+    #
+    #     for y in range(height_in_modules):
+    #         for x in range(width_in_modules):
+    #             col = (0, 0, 0) if self.matrix[y][x] == 1 else (255, 255, 255) if self.matrix[y][x] == 0 else\
+    #                 (0, 0, 255) if self.matrix[y][x] == 4 else (255, 0, 0) if self.matrix[y][x] == 3 else\
+    #                 (0, 255, 0) if self.matrix[y][x] == 2 else (128, 128, 128)
+    #             pygame.draw.rect(screen, col, (x * pixels_per_module, y * pixels_per_module,
+    #                                            (x + 1) * pixels_per_module, (y + 1) * pixels_per_module))
+    #     pygame.draw.rect(screen, (255, 255, 255), (width_in_modules * pixels_per_module, 0,
+    #                                                self.width_in_pixels, self.height_in_pixels))
+    #     pygame.draw.rect(screen, (255, 255, 255), (0, height_in_modules * pixels_per_module,
+    #                                                self.width_in_pixels, self.height_in_pixels))
 
 
 if __name__ == '__main__':
