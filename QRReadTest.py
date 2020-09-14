@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from math import atan2, pi
 
 
 def main():
@@ -23,7 +24,51 @@ def main():
         for y in y_mid_lines:
             if y[1] <= x[0] <= y[2] and x[1] <= y[0] <= x[2]:
                 mid_point.insert(0, y[0])
-        mid_points.append(mid_point)
+                mid_points.append(mid_point)
+                break
+
+    # determine angle of qr code image
+    min_x = min(m[0] for m in mid_points)
+    min_y = min(m[1] for m in mid_points)
+    max_x = max(m[0] for m in mid_points)
+    min_x_min_y = [m for m in mid_points if m[0] == min_x and m[1] == min_y]    # only has entry for 0 rotation
+    if len(min_x_min_y) == 0:
+        # We have a non-zero rotation (or a distortion)
+        rightmost = [m for m in mid_points if m[0] == max_x]
+        leftmost = sorted([m for m in mid_points if m[0] != max_x], key=lambda x: x[1])
+        y_diff = rightmost[0][1] - leftmost[0][1]
+        x_diff = rightmost[0][0] - leftmost[0][0]
+        angle = atan2(y_diff, x_diff)   # +ve values ==> clockwise (positive) rotation
+    else:
+        angle = 0
+
+    q = rotate_image(t, angle)
+    cv2.imshow("orig", q)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    a = 1
+
+
+def rotate_image(image, angle):
+    degrees = angle * 180 / pi
+    image_center = tuple(np.array(image.shape[1::-1]) / 2)
+    rot_mat = cv2.getRotationMatrix2D(image_center, degrees, 1.0)
+    result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
+    return result
+
+
+
+    # TEST IF CANDIDATE FINDER PATTERN HAS BLACK PIXELS AROUND IT
+    # pixel_width = (y_mid_lines[0][2] - y_mid_lines[0][1]) // 7
+    # pixel_height = (x_mid_lines[0][2] - x_mid_lines[0][1]) // 7
+    #
+    # finder_patterns = []
+    # for mid_point in mid_points:
+    #     if t_forced[mid_point[1] - pixel_height, mid_point[0]] == 1 and\
+    #             t_forced[mid_point[1] + pixel_height, mid_point[0]] == 1 and\
+    #             t_forced[mid_point[1], mid_point[0] - pixel_width] == 1 and\
+    #             t_forced[mid_point[1], mid_point[0] + pixel_width] == 1:
+    #         finder_patterns.append(mid_point)
 
     first_pixel_data = np.where(t < threshold)
     first_pixel_row = first_pixel_data[0][0]
@@ -71,9 +116,10 @@ def cluster_groups(list_to_cluster):
         if len(append_list) == 0:
             groups.append([coord])
 
-    # return the longest 3 sublists (one for each finder pattern), with each sublist sorted
-    # return sorted((sorted(group) for group in groups), key=len, reverse=True)[:3]
-
+    # ASSUMPTION:
+    # Finder patterns are designed to create the densest clusters of 1:1:3:1:1 pixel patterns in the QR Code
+    # and masking on the rest of the code helps to ensure this.
+    # Therefore, return the 3 sublist with the most entries
     finder_patterns_clusters = sorted(groups, key=len, reverse=True)[:3]
     mid_lines = []
     for cluster in finder_patterns_clusters:
