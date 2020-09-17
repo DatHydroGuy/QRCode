@@ -1,14 +1,19 @@
 import cv2
 import numpy as np
 from math import atan2, pi
+from QrCode import QrCode
 
 
 class QrCodeRead:
     threshold = None
     binary_image = None
     finder_pattern_centers = []
+    alignment_pattern_centers = []
     x_medians = []
     y_medians = []
+    lower_left_pattern = []
+    upper_left_pattern = []
+    upper_right_pattern = []
     angle = 1
     module_width = 0
     module_height = 0
@@ -21,44 +26,196 @@ class QrCodeRead:
             raise FileNotFoundError(f'The file {qr_code_image} does not exist or is not valid.')
 
     def read_qr_code(self):
+        space_value = 0
+        pixel_value = 1
         self.correct_image_rotation()
-        self.threshold = (self.raw_image.max() - self.raw_image.min()) // 2  # light / dark threshold value
-        self.binary_image = np.where(np.max(self.raw_image, axis=2) > self.threshold, 0, 1)  # spaces=0, pixels=1
-        self.x_medians, self.module_width = self.get_medians(self.binary_image)
-        self.y_medians, self.module_height = self.get_medians(np.transpose(self.binary_image))
-        self.finder_pattern_centers = self.intersect_medians(self.x_medians, self.y_medians)
-        self.get_image_and_module_widths()
+        self.get_finder_pattern_centers(space_value, pixel_value)
+        if len(self.finder_pattern_centers) < 3:
+            # Need to try inverted light / dark modules
+            self.correct_image_rotation(1, 0)
+            space_value = 1
+            pixel_value = 0
+
+        self.get_image_and_module_dimensions()
+        if self.qr_code_version == 1:
+            self.reset_module_dimensions_from_timing_patterns()
+        else:
+            self.get_alignment_pattern_candidates()
+            self.get_alignment_pattern_centers(space_value, pixel_value)
 
         a = 1
 
-    def get_image_and_module_widths(self):
-        upper_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
-                              p[1] < self.binary_image.shape[1] // 2][0]
-        upper_right_pattern = [p for p in self.finder_pattern_centers if p[0] > self.binary_image.shape[0] // 2 and
-                               p[1] < self.binary_image.shape[1] // 2][0]
-        lower_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
-                              p[1] > self.binary_image.shape[1] // 2][0]
+    def get_alignment_pattern_centers(self, space_value=0, pixel_value=1):
+        w = 4 * self.module_width
+        h = 4 * self.module_height
+        total_elements = 25 * self.module_width * self.module_height
+        template = self.get_alignment_pattern_template(space_value, pixel_value)
 
-        upper_left_width = [y[2] - y[1] for y in self.x_medians if y[0] == upper_left_pattern[1]][0]
-        upper_right_width = [y[2] - y[1] for y in self.x_medians if y[0] == upper_right_pattern[1]][0]
-        x_module_width = round((upper_left_width + upper_right_width) / 14)
-        inter_module_distance = upper_right_pattern[0] - upper_left_pattern[0]
-        self.qr_code_version = round(((inter_module_distance / x_module_width) - 10) / 4)
+        for ap_idx, alignment_pattern in enumerate(self.alignment_pattern_centers):
+            px = alignment_pattern[0]
+            py = alignment_pattern[1]
+            array_to_scan = self.binary_image[py - h: py + h, px - w: px + w]
 
-        upper_left_height = [x[2] - x[1] for x in self.y_medians if x[0] == upper_left_pattern[0]][0]
-        lower_left_height = [x[2] - x[1] for x in self.y_medians if x[0] == lower_left_pattern[0]][0]
-        y_module_height = round((upper_left_height + lower_left_height) / 14)
+            max_x = -1
+            max_y = -1
+            max_percent = 0
+            for y in range(len(array_to_scan) - len(template)):
+                for x in range(len(array_to_scan[0]) - len(template[0])):
+                    temp = array_to_scan[y: y + 5 * self.module_height, x: x + 5 * self.module_width]
 
-        a = 1
+                    number_of_equal_elements = np.sum(temp == template)
+                    percentage = number_of_equal_elements / total_elements
+                    if percentage > max_percent:
+                        max_percent = percentage
+                        max_x = x
+                        max_y = y
 
-    def correct_image_rotation(self):
+            self.alignment_pattern_centers[ap_idx] = [px - int(1.5 * self.module_width) + max_x,
+                                                      py - int(1.5 * self.module_height) + max_y]
+
+    def get_alignment_pattern_template(self, space_value=0, pixel_value=1):
+        template1 = [[pixel_value for _ in range(5 * self.module_width)] for _ in range(self.module_height)]
+        template2 = [[pixel_value for _ in range(self.module_width)] +
+                     [space_value for _ in range(3 * self.module_width)] +
+                     [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
+        template3 = [[pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
+                     [pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
+                     [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
+        template = np.array(template1 + template2 + template3 + template2 + template1)
+        return template
+
+    def get_alignment_pattern_candidates(self):
+        centers_in_modules = []
+        module_values_for_version = QrCode.alignment_pattern_locations[self.qr_code_version]
+        for y in module_values_for_version:
+            for x in module_values_for_version:
+                centers_in_modules.append([x, y])
+
+        # Remove any alignment pattern which would overlap our 3 finder patterns
+        entries_to_remove = [[module_values_for_version[0], module_values_for_version[0]],
+                             [module_values_for_version[0], module_values_for_version[-1]],
+                             [module_values_for_version[-1], module_values_for_version[0]]]
+
+        for entry in entries_to_remove:
+            centers_in_modules.remove(entry)
+
+        # subtract the module x & y for the center of the upper-left finder pattern
+        for idx, center in enumerate(centers_in_modules):
+            centers_in_modules[idx] = [center[0] - 3, center[1] - 3]
+
+        self.alignment_pattern_centers = [[self.upper_left_pattern[0] + c[0] * self.module_width,
+                                           self.upper_left_pattern[1] + c[1] * self.module_height]
+                                          for c in centers_in_modules]
+
+    def reset_module_dimensions_from_timing_patterns(self):
+        col_in_pixels_start = self.upper_left_pattern[0] + self.module_width * 3
+        col_in_pixels_end = self.upper_right_pattern[0] - self.module_width * 3
+        row_in_pixels_start = self.upper_left_pattern[1] + self.module_height * 3
+        row_in_pixels_end = self.lower_left_pattern[1] - self.module_height * 3
+        half_col = int(self.module_width * 0.5)
+        half_row = int(self.module_height * 0.5)
+        image_row = self.binary_image[row_in_pixels_start, col_in_pixels_start - half_col: col_in_pixels_end + half_col]
+        groupings = np.diff(np.flatnonzero(np.concatenate(([True], image_row[1:] != image_row[:-1], [True]))))
+        self.module_width = round(np.average(groupings))
+        image_col = self.binary_image[row_in_pixels_start - half_row: row_in_pixels_end + half_row, col_in_pixels_start]
+        groupings = np.diff(np.flatnonzero(np.concatenate(([True], image_col[1:] != image_col[:-1], [True]))))
+        self.module_height = round(np.average(groupings))
+
+    def get_image_and_module_dimensions(self):
+        self.upper_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
+                                   p[1] < self.binary_image.shape[1] // 2][0]
+        self.upper_right_pattern = [p for p in self.finder_pattern_centers if p[0] > self.binary_image.shape[0] // 2 and
+                                    p[1] < self.binary_image.shape[1] // 2][0]
+        self.lower_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
+                                   p[1] > self.binary_image.shape[1] // 2][0]
+
+        upper_left_width = [y[2] - y[1] for y in self.x_medians if y[0] == self.upper_left_pattern[1]][0]
+        upper_right_width = [y[2] - y[1] for y in self.x_medians if y[0] == self.upper_right_pattern[1]][0]
+        module_x_pixels = round((upper_left_width + upper_right_width) / 14)
+
+        inter_module_distance = self.upper_right_pattern[0] - self.upper_left_pattern[0]
+        self.qr_code_version = round(((inter_module_distance / module_x_pixels) - 10) / 4)
+
+        if self.qr_code_version > 6:
+            self.module_width = round(upper_right_width / 7)
+            lower_left_height = [x[2] - x[1] for x in self.y_medians if x[0] == self.lower_left_pattern[0]][0]
+            self.module_height = round(lower_left_height / 7)
+            self.qr_code_version = self.decode_upper_right_version_information(self.upper_right_pattern)
+
+            if self.qr_code_version == -1:
+                self.qr_code_version = self.decode_lower_left_version_information(self.lower_left_pattern)
+
+            if self.qr_code_version == -1:
+                raise ValueError('Cannot find version information in QR Code.')
+
+    def decode_upper_right_version_information(self, upper_right_center):
+        x_pix = upper_right_center[0] - 5 * self.module_width
+        y_pix = upper_right_center[1] + 2 * self.module_height
+        version_bytes = []
+        for _ in range(18):
+            version_bytes.append(self.read_value_from_binary_image_in_pixels(x_pix, y_pix))
+            x_pix -= self.module_width
+            if len(version_bytes) % 3 == 0:
+                x_pix += 3 * self.module_width
+                y_pix -= self.module_height
+
+        version_string = ''.join(str(s) for s in version_bytes)
+        if version_string in QrCode.version_information:
+            qr_code_version = QrCode.version_information.index(version_string) + 7
+        else:
+            qr_code_version = self.get_version_from_bit_string(version_string)
+
+        return qr_code_version
+
+    def decode_lower_left_version_information(self, lower_left_center):
+        x_pix = lower_left_center[0] + 2 * self.module_width
+        y_pix = lower_left_center[1] - 5 * self.module_height
+        version_bytes = []
+        for _ in range(18):
+            version_bytes.append(self.read_value_from_binary_image_in_pixels(x_pix, y_pix))
+            y_pix -= self.module_height
+            if len(version_bytes) % 3 == 0:
+                x_pix -= self.module_width
+                y_pix += 3 * self.module_height
+
+        version_string = ''.join(str(s) for s in version_bytes)
+        if version_string in QrCode.version_information:
+            qr_code_version = QrCode.version_information.index(version_string) + 7
+        else:
+            qr_code_version = self.get_version_from_bit_string(version_string)
+
+        return qr_code_version
+
+    @staticmethod
+    def get_version_from_bit_string(string_to_find):
+        # Version information id encoded with a maximum Hamming distance of 8.  This allows up to 3 bits to differ
+        # when performing a lookup.  The aim is to find the bit string corresponding to the smallest Hamming number.
+        min_dist = 100
+        min_dist_index = -1
+        for v, version in enumerate(QrCode.version_information):
+            dist = sum(c1 != c2 for c1, c2 in zip(string_to_find, version))     # get Hamming distance
+            if dist < min_dist:
+                min_dist = dist
+                min_dist_index = v
+        if min_dist > 3:
+            return -1
+
+        return min_dist_index + 7   # Only versions 7 and above are stored as bit strings
+
+    def read_value_from_binary_image_in_pixels(self, x_pixel, y_pixel):
+        return self.binary_image[y_pixel, x_pixel]
+
+    def read_value_from_binary_image_in_modules(self, x_module, y_module):
+        x_pixel = (x_module + 0.5) * self.module_width
+        y_pixel = (y_module + 0.5) * self.module_height
+        return self.read_value_from_binary_image_in_pixels(x_pixel, y_pixel)
+
+    def correct_image_rotation(self, space_value=0, pixel_value=1):
         half_a_degree = 0.5 * pi / 180
         while abs(self.angle) > half_a_degree:
-            self.threshold = (self.raw_image.max() - self.raw_image.min()) // 2  # light / dark threshold value
-            self.binary_image = np.where(np.max(self.raw_image, axis=2) > self.threshold, 0, 1)  # spaces=0, pixels=1
-            self.x_medians, self.module_width = self.get_medians(self.binary_image)
-            self.y_medians, self.module_height = self.get_medians(np.transpose(self.binary_image))
-            self.finder_pattern_centers = self.intersect_medians(self.x_medians, self.y_medians)
+            self.get_finder_pattern_centers(space_value, pixel_value)
+            if len(self.finder_pattern_centers) < 3:
+                return
             self.angle = self.determine_angle_of_image(self.finder_pattern_centers)
             self.raw_image = self.rotate_image(self.raw_image, self.angle)
 
@@ -87,6 +244,15 @@ class QrCodeRead:
             angle = 0
 
         return angle
+
+    def get_finder_pattern_centers(self, space_value, pixel_value):
+        self.threshold = (self.raw_image.max() - self.raw_image.min()) // 2  # light / dark threshold value
+        # Reduce raw image to a binary array of 1s and 0s, determined by the threshold value.
+        # By default, spaces are represented by 0s and pixels by 1s, although these can be reversed by parameters.
+        self.binary_image = np.where(np.max(self.raw_image, axis=2) > self.threshold, space_value, pixel_value)
+        self.x_medians, self.module_width = self.get_medians(self.binary_image)
+        self.y_medians, self.module_height = self.get_medians(np.transpose(self.binary_image))
+        self.finder_pattern_centers = self.intersect_medians(self.x_medians, self.y_medians)
 
     @staticmethod
     def intersect_medians(x_medians, y_medians):
@@ -118,15 +284,13 @@ class QrCodeRead:
                 start_position_in_row = np.sum(groupings[row_index][:col5])   # pixel index of start of sliding window
                 norm = np.divide(sub_array, min(sub_array))     # normalised sub-array (lowest number will be 1)
 
+                is_finder_pattern = 0.5 <= norm[0] <= 1.5 and 0.5 <= norm[1] <= 1.5 and 2.5 <= norm[2] <= 3.5 and \
+                    0.5 <= norm[3] <= 1.5 and 0.5 <= norm[4] <= 1.5
+
                 # Valid pattern must start with a dark pixel
                 is_pixel = binary_array[row_index][start_position_in_row] == 1
 
-                if is_pixel and \
-                        0.5 <= norm[0] <= 1.5 and \
-                        0.5 <= norm[1] <= 1.5 and \
-                        2.5 <= norm[2] <= 3.5 and \
-                        0.5 <= norm[3] <= 1.5 and \
-                        0.5 <= norm[4] <= 1.5:
+                if is_pixel and is_finder_pattern:
                     pixels_per_module = sub_array[np.where(norm == 1)][0]
                     end_position_in_row = np.sum(groupings[row_index][:col5 + 5])  # pixel index: end of sliding window
                     candidates.append((row_index, start_position_in_row, end_position_in_row))
@@ -180,5 +344,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('Untitled4-3.png')
+    qrr = QrCodeRead('Untitled_pi.png')
     qrr.read_qr_code()

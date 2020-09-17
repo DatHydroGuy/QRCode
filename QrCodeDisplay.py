@@ -7,26 +7,6 @@ from Polynomials import Polynomials
 
 
 class QrCodeDraw:
-    alignment_pattern_locations = [[], [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42],
-                                   [6, 26, 46], [6, 28, 50], [6, 30, 54], [6, 32, 58], [6, 34, 62], [6, 26, 46, 66],
-                                   [6, 26, 48, 70], [6, 26, 50, 74], [6, 30, 54, 78], [6, 30, 56, 82], [6, 30, 58, 86],
-                                   [6, 34, 62, 90], [6, 28, 50, 72, 94], [6, 26, 50, 74, 98], [6, 30, 54, 78, 102],
-                                   [6, 28, 54, 80, 106], [6, 32, 58, 84, 110], [6, 30, 58, 86, 114],
-                                   [6, 34, 62, 90, 118], [6, 26, 50, 74, 98, 122], [6, 30, 54, 78, 102, 126],
-                                   [6, 26, 52, 78, 104, 130], [6, 30, 56, 82, 108, 134], [6, 34, 60, 86, 112, 138],
-                                   [6, 30, 58, 86, 114, 142], [6, 34, 62, 90, 118, 146], [6, 30, 54, 78, 102, 126, 150],
-                                   [6, 24, 50, 76, 102, 128, 154], [6, 28, 54, 80, 106, 132, 158],
-                                   [6, 32, 58, 84, 110, 136, 162], [6, 26, 54, 82, 110, 138, 166],
-                                   [6, 30, 58, 86, 114, 142, 170]]
-    version_information = ['000111110010010100', '001000010110111100', '001001101010011001', '001010010011010011',
-                           '001011101111110110', '001100011101100010', '001101100001000111', '001110011000001101',
-                           '001111100100101000', '010000101101111000', '010001010001011101', '010010101000010111',
-                           '010011010100110010', '010100100110100110', '010101011010000011', '010110100011001001',
-                           '010111011111101100', '011000111011000100', '011001000111100001', '011010111110101011',
-                           '011011000010001110', '011100110000011010', '011101001100111111', '011110110101110101',
-                           '011111001001010000', '100000100111010101', '100001011011110000', '100010100010111010',
-                           '100011011110011111', '100100101100001011', '100101010000101110', '100110101001100100',
-                           '100111010101000001', '101000110001101001']  # Note versions 7 to 40 inclusive
     masked_format_info = {'00000': '101010000010010',
                           '00001': '101000100100101',
                           '00010': '101111001111100',
@@ -145,7 +125,7 @@ class QrCodeDraw:
     def write_version_information(self):
         if self.qr_code.minimum_version < 7:
             return
-        version_info = self.version_information[self.qr_code.minimum_version - 7][::-1]
+        version_info = self.qr_code.version_information[self.qr_code.minimum_version - 7][::-1]
         column = self.matrix[0].index(4)
         row = [a[0] for a in self.matrix].index(4)
         for i in range(6):
@@ -465,8 +445,8 @@ class QrCodeDraw:
             y_val = 5 - y_val
 
     def create_alignment_patterns(self):
-        for y in self.alignment_pattern_locations[self.qr_code.minimum_version]:
-            for x in self.alignment_pattern_locations[self.qr_code.minimum_version]:
+        for y in self.qr_code.alignment_pattern_locations[self.qr_code.minimum_version]:
+            for x in self.qr_code.alignment_pattern_locations[self.qr_code.minimum_version]:
                 self.create_alignment_pattern(x, y)
 
     def create_alignment_pattern(self, x, y):
