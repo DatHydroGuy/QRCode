@@ -8,7 +8,7 @@ class QrCodeRead:
     threshold = None
     binary_image = None
     finder_pattern_centers = []
-    alignment_pattern_centers = []
+    sampling_grid = None
     x_medians = []
     y_medians = []
     lower_left_pattern = []
@@ -18,6 +18,8 @@ class QrCodeRead:
     module_width = 0
     module_height = 0
     qr_code_version = -1
+    width_in_modules = 0
+    height_in_modules = 0
 
     def __init__(self, qr_code_image):
         try:
@@ -40,72 +42,178 @@ class QrCodeRead:
         if self.qr_code_version == 1:
             self.reset_module_dimensions_from_timing_patterns()
         else:
-            self.get_alignment_pattern_candidates()
-            self.get_alignment_pattern_centers(space_value, pixel_value)
+            self.get_alignment_pattern_positions(space_value, pixel_value)
 
+        self.populate_sampling_grid(space_value, pixel_value)
         a = 1
 
-    def get_alignment_pattern_centers(self, space_value=0, pixel_value=1):
-        w = 4 * self.module_width
-        h = 4 * self.module_height
-        total_elements = 25 * self.module_width * self.module_height
-        template = self.get_alignment_pattern_template(space_value, pixel_value)
+    def populate_sampling_grid(self, space_value=0, pixel_value=1):
+        pass
 
-        for ap_idx, alignment_pattern in enumerate(self.alignment_pattern_centers):
-            px = alignment_pattern[0]
-            py = alignment_pattern[1]
-            array_to_scan = self.binary_image[py - h: py + h, px - w: px + w]
+    def get_alignment_pattern_positions(self, space_value=0, pixel_value=1):
+        alignment_positions = QrCode.alignment_pattern_locations[self.qr_code_version]
+        self.width_in_modules = alignment_positions[-1] + 7
+        self.height_in_modules = alignment_positions[-1] + 7
+        self.initialise_sampling_grid()
+        pattern_limit = int(round((len(alignment_positions) - 1) / 2))
+        self.resolve_upper_left_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
+        self.resolve_upper_right_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
+        self.resolve_lower_left_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
 
-            max_x = -1
-            max_y = -1
-            max_percent = 0
-            for y in range(len(array_to_scan) - len(template)):
-                for x in range(len(array_to_scan[0]) - len(template[0])):
-                    temp = array_to_scan[y: y + 5 * self.module_height, x: x + 5 * self.module_width]
+    def resolve_upper_left_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
+        top_row_positions = [[self.upper_left_pattern[0] + 3 * self.module_width,
+                              self.upper_left_pattern[1] + 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
+        for x in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
+            candidate = [module_diff_in_pixels + top_row_positions[x - 1][0], top_row_positions[x - 1][1]]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            top_row_positions.append(candidate)
+            self.sampling_grid[alignment_patterns[0]][alignment_patterns[x]] = candidate
 
-                    number_of_equal_elements = np.sum(temp == template)
-                    percentage = number_of_equal_elements / total_elements
-                    if percentage > max_percent:
-                        max_percent = percentage
-                        max_x = x
-                        max_y = y
+        left_row_positions = [[self.upper_left_pattern[0] + 3 * self.module_width,
+                              self.upper_left_pattern[1] + 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_height
+        for y in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
+            candidate = [left_row_positions[y - 1][0], module_diff_in_pixels + left_row_positions[y - 1][1]]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            left_row_positions.append(candidate)
+            self.sampling_grid[alignment_patterns[y]][alignment_patterns[0]] = candidate
+            for x in range(1, pattern_limit + 1):
+                candidate = [top_row_positions[x][0], left_row_positions[y][1]]
+                candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+                self.sampling_grid[alignment_patterns[y]][alignment_patterns[x]] = candidate
 
-            self.alignment_pattern_centers[ap_idx] = [px - int(1.5 * self.module_width) + max_x,
-                                                      py - int(1.5 * self.module_height) + max_y]
+    def resolve_upper_right_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
+        top_row_positions = [[self.upper_right_pattern[0] - 3 * self.module_width,
+                              self.upper_right_pattern[1] + 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
+        for x in range(len(alignment_patterns) - 2, pattern_limit, -1):   # ignore last element for same reason
+            candidate = [top_row_positions[0][0] - module_diff_in_pixels, top_row_positions[0][1]]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            top_row_positions.insert(0, candidate)
+            self.sampling_grid[alignment_patterns[0]][alignment_patterns[x]] = candidate
 
-    def get_alignment_pattern_template(self, space_value=0, pixel_value=1):
-        template1 = [[pixel_value for _ in range(5 * self.module_width)] for _ in range(self.module_height)]
-        template2 = [[pixel_value for _ in range(self.module_width)] +
-                     [space_value for _ in range(3 * self.module_width)] +
-                     [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
-        template3 = [[pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
-                     [pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
-                     [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
-        template = np.array(template1 + template2 + template3 + template2 + template1)
-        return template
+        right_row_positions = [[self.upper_right_pattern[0] - 3 * self.module_width,
+                                self.upper_right_pattern[1] + 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_height
+        for y in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
+            candidate = [right_row_positions[y - 1][0], module_diff_in_pixels + right_row_positions[y - 1][1]]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            right_row_positions.append(candidate)
+            self.sampling_grid[alignment_patterns[y]][alignment_patterns[-1]] = candidate
+            for x in range(1, pattern_limit):
+                candidate = [top_row_positions[-1 - x][0], right_row_positions[y][1]]
+                candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+                self.sampling_grid[alignment_patterns[y]][alignment_patterns[-1 - x]] = candidate
 
-    def get_alignment_pattern_candidates(self):
-        centers_in_modules = []
-        module_values_for_version = QrCode.alignment_pattern_locations[self.qr_code_version]
-        for y in module_values_for_version:
-            for x in module_values_for_version:
-                centers_in_modules.append([x, y])
+    def resolve_lower_left_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
+        bottom_row_positions = [[self.lower_left_pattern[0] + 3 * self.module_width,
+                                 self.lower_left_pattern[1] - 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
+        for x in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
+            candidate = [module_diff_in_pixels + bottom_row_positions[x - 1][0], bottom_row_positions[x - 1][1]]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            bottom_row_positions.append(candidate)
+            self.sampling_grid[alignment_patterns[-1]][alignment_patterns[x]] = candidate
 
-        # Remove any alignment pattern which would overlap our 3 finder patterns
-        entries_to_remove = [[module_values_for_version[0], module_values_for_version[0]],
-                             [module_values_for_version[0], module_values_for_version[-1]],
-                             [module_values_for_version[-1], module_values_for_version[0]]]
+        left_row_positions = [[self.lower_left_pattern[0] + 3 * self.module_width,
+                               self.lower_left_pattern[1] - 3 * self.module_height]]
+        module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_height
+        for y in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
+            candidate = [left_row_positions[y - 1][0], left_row_positions[y - 1][1] - module_diff_in_pixels]
+            candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+            left_row_positions.append(candidate)
+            self.sampling_grid[alignment_patterns[-1 - y]][alignment_patterns[0]] = candidate
+            for x in range(1, pattern_limit + 1):
+                candidate = [bottom_row_positions[x][0], left_row_positions[y][1]]
+                candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
+                self.sampling_grid[alignment_patterns[-1 - y]][alignment_patterns[x]] = candidate
 
-        for entry in entries_to_remove:
-            centers_in_modules.remove(entry)
+    def tweak_alignment_pattern_position(self, candidate, space_value, pixel_value):
+        if self.binary_image[candidate[1], candidate[0]] == space_value:
+            candidate = self.find_nearest_pixel(candidate, pixel_value)
+        self.center_between_spaces_horizontally(candidate, space_value, pixel_value)
+        self.center_between_spaces_vertically(candidate, space_value, pixel_value)
+        return candidate
 
-        # subtract the module x & y for the center of the upper-left finder pattern
-        for idx, center in enumerate(centers_in_modules):
-            centers_in_modules[idx] = [center[0] - 3, center[1] - 3]
+    def center_between_spaces_vertically(self, test_pixel, space_value=0, pixel_value=1):
+        up_dist = 0
+        down_dist = 0
+        for i in range(1, 3 * self.module_height):
+            if up_dist == 0 and self.binary_image[test_pixel[1] - i, test_pixel[0]] == space_value and \
+                    self.binary_image[test_pixel[1] - i - 1, test_pixel[0]] == pixel_value:
+                up_dist = i
+            if down_dist == 0 and self.binary_image[test_pixel[1] + i, test_pixel[0]] == space_value and \
+                    self.binary_image[test_pixel[1] + i + 1, test_pixel[0]] == pixel_value:
+                down_dist = i
+            if up_dist != 0 and down_dist != 0:
+                break
+        test_pixel[1] += (down_dist - up_dist) // 2
 
-        self.alignment_pattern_centers = [[self.upper_left_pattern[0] + c[0] * self.module_width,
-                                           self.upper_left_pattern[1] + c[1] * self.module_height]
-                                          for c in centers_in_modules]
+    def center_between_spaces_horizontally(self, test_pixel, space_value=0, pixel_value=1):
+        left_dist = 0
+        right_dist = 0
+        for i in range(1, 3 * self.module_width):
+            if left_dist == 0 and self.binary_image[test_pixel[1], test_pixel[0] - i] == space_value and \
+                    self.binary_image[test_pixel[1], test_pixel[0] - i - 1] == pixel_value:
+                left_dist = i
+            if right_dist == 0 and self.binary_image[test_pixel[1], test_pixel[0] + i] == space_value and \
+                    self.binary_image[test_pixel[1], test_pixel[0] + i + 1] == pixel_value:
+                right_dist = i
+            if left_dist != 0 and right_dist != 0:
+                break
+        test_pixel[0] += (right_dist - left_dist) // 2
+
+    def find_nearest_pixel(self, test_pixel, pixel_value=1):
+        indices_of_pixels = []
+        for radius in range(1, self.module_width):
+            temp = self.binary_image[test_pixel[1] - radius: test_pixel[1] + radius + 1,
+                                     test_pixel[0] - radius: test_pixel[0] + radius + 1]
+            if np.any((temp == pixel_value)):
+                indices_of_pixels = [[x - radius, y - radius] for y, x in list(zip(*np.where(temp == pixel_value)))]
+                indices_of_pixels.sort(key=lambda x: x[0] * x[0] + x[1] * x[1])
+                indices_of_pixels = [test_pixel[0] + indices_of_pixels[0][0], test_pixel[1] + indices_of_pixels[0][1]]
+                break
+        return indices_of_pixels
+
+    # def get_alignment_pattern_centers(self, space_value=0, pixel_value=1):
+    #     w = 4 * self.module_width
+    #     h = 4 * self.module_height
+    #     total_elements = 25 * self.module_width * self.module_height
+    #     template = self.get_alignment_pattern_template(space_value, pixel_value)
+    #
+    #     for ap_idx, alignment_pattern in enumerate(self.alignment_pattern_centers):
+    #         px = alignment_pattern[0]
+    #         py = alignment_pattern[1]
+    #         array_to_scan = self.binary_image[py - h: py + h, px - w: px + w]
+    #
+    #         max_x = -1
+    #         max_y = -1
+    #         max_percent = 0
+    #         for y in range(len(array_to_scan) - len(template)):
+    #             for x in range(len(array_to_scan[0]) - len(template[0])):
+    #                 temp = array_to_scan[y: y + 5 * self.module_height, x: x + 5 * self.module_width]
+    #
+    #                 number_of_equal_elements = np.sum(temp == template)
+    #                 percentage = number_of_equal_elements / total_elements
+    #                 if percentage > max_percent:
+    #                     max_percent = percentage
+    #                     max_x = x
+    #                     max_y = y
+    #
+    #         self.alignment_pattern_centers[ap_idx] = [px - int(1.5 * self.module_width) + max_x,
+    #                                                   py - int(1.5 * self.module_height) + max_y]
+    #
+    # def get_alignment_pattern_template(self, space_value=0, pixel_value=1):
+    #     template1 = [[pixel_value for _ in range(5 * self.module_width)] for _ in range(self.module_height)]
+    #     template2 = [[pixel_value for _ in range(self.module_width)] +
+    #                  [space_value for _ in range(3 * self.module_width)] +
+    #                  [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
+    #     template3 = [[pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
+    #                  [pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
+    #                  [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
+    #     template = np.array(template1 + template2 + template3 + template2 + template1)
+    #     return template
 
     def reset_module_dimensions_from_timing_patterns(self):
         col_in_pixels_start = self.upper_left_pattern[0] + self.module_width * 3
@@ -116,10 +224,19 @@ class QrCodeRead:
         half_row = int(self.module_height * 0.5)
         image_row = self.binary_image[row_in_pixels_start, col_in_pixels_start - half_col: col_in_pixels_end + half_col]
         groupings = np.diff(np.flatnonzero(np.concatenate(([True], image_row[1:] != image_row[:-1], [True]))))
+        self.width_in_modules = len(groupings) + 12
         self.module_width = round(np.average(groupings))
         image_col = self.binary_image[row_in_pixels_start - half_row: row_in_pixels_end + half_row, col_in_pixels_start]
         groupings = np.diff(np.flatnonzero(np.concatenate(([True], image_col[1:] != image_col[:-1], [True]))))
         self.module_height = round(np.average(groupings))
+        self.height_in_modules = len(groupings) + 12
+        self.initialise_sampling_grid()
+
+    def initialise_sampling_grid(self):
+        self.sampling_grid = [[[] for _ in range(self.width_in_modules)] for _ in range(self.height_in_modules)]
+        self.sampling_grid[3][3] = self.upper_left_pattern
+        self.sampling_grid[3][-4] = self.upper_right_pattern
+        self.sampling_grid[-4][3] = self.lower_left_pattern
 
     def get_image_and_module_dimensions(self):
         self.upper_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
@@ -344,5 +461,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('Untitled_pi.png')
+    qrr = QrCodeRead('Untitled_v21.png')
     qrr.read_qr_code()
