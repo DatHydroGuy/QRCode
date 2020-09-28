@@ -99,6 +99,7 @@ class QrCode:
                                    [6, 24, 50, 76, 102, 128, 154], [6, 28, 54, 80, 106, 132, 158],
                                    [6, 32, 58, 84, 110, 136, 162], [6, 26, 54, 82, 110, 138, 166],
                                    [6, 30, 58, 86, 114, 142, 170]]
+    error_correction_indicators = ['01', '00', '11', '10']
 
     def __init__(self, error_correction_level=0, minimum_version=1, mask_pattern=-1):
         self.error_correction_level = error_correction_level

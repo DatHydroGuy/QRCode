@@ -40,7 +40,6 @@ class QrCodeDraw:
                           '11110': '010111011011010',
                           '11111': '010101111101101'
                           }
-    error_correction_indicators = ['01', '00', '11', '10']
     polynomial_manager = Polynomials()
 
     def __init__(self, qr_code, mask_number=-1, width=1000, height=1000):
@@ -137,7 +136,7 @@ class QrCodeDraw:
             self.matrix[i][column + 2] = int(version_info[i * 3 + 2])
 
     def write_format_string(self, mask_number):
-        format_info = self.error_correction_indicators[self.qr_code.error_correction_level]
+        format_info = self.qr_code.error_correction_indicators[self.qr_code.error_correction_level]
         format_info += f'{mask_number:0>3b}'
         format_info = self.masked_format_info[format_info]
 
@@ -530,7 +529,7 @@ class QrCodeDraw:
 
 
 if __name__ == '__main__':
-    qr = QrCode(error_correction_level=3, minimum_version=1)
+    qr = QrCode(error_correction_level=3, minimum_version=21)
     qr.generate('Ratio of circle circumference to diameter (C/D) π = 3.141592653589793238462643383279....')
     qr_draw = QrCodeDraw(qr)
     qr_draw.draw()

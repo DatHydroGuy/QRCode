@@ -20,6 +20,40 @@ class QrCodeRead:
     qr_code_version = -1
     width_in_modules = 0
     height_in_modules = 0
+    error_correction_level = -1
+    mask_pattern = -1
+    format_decoding_information = {'101010000010010': ['00000', '0000000000'],
+                                   '101000100100101': ['00001', '0100110111'],
+                                   '101111001111100': ['00010', '1001101110'],
+                                   '101101101001011': ['00011', '1101011001'],
+                                   '100010111111001': ['00100', '0111101011'],
+                                   '100000011001110': ['00101', '0011011100'],
+                                   '100111110010111': ['00110', '1110000101'],
+                                   '100101010100000': ['00111', '1010110010'],
+                                   '111011111000100': ['01000', '1111010110'],
+                                   '111001011110011': ['01001', '1011100001'],
+                                   '111110110101010': ['01010', '0110111000'],
+                                   '111100010011101': ['01011', '0010001111'],
+                                   '110011000101111': ['01100', '1000111101'],
+                                   '110001100011000': ['01101', '1100001010'],
+                                   '110110001000001': ['01110', '0001010011'],
+                                   '110100101110110': ['01111', '0101100100'],
+                                   '001011010001001': ['10000', '1010011011'],
+                                   '001001110111110': ['10001', '1110101100'],
+                                   '001110011100111': ['10010', '0011110101'],
+                                   '001100111010000': ['10011', '0111000010'],
+                                   '000011101100010': ['10100', '1101110000'],
+                                   '000001001010101': ['10101', '1001000111'],
+                                   '000110100001100': ['10110', '0100011110'],
+                                   '000100000111011': ['10111', '0000101001'],
+                                   '011010101011111': ['11000', '0101001101'],
+                                   '011000001101000': ['11001', '0001111010'],
+                                   '011111100110001': ['11010', '1100100011'],
+                                   '011101000000110': ['11011', '1000010100'],
+                                   '010010010110100': ['11100', '0010100110'],
+                                   '010000110000011': ['11101', '0110010001'],
+                                   '010111011011010': ['11110', '1011001000'],
+                                   '010101111101101': ['11111', '1111111111']}
 
     def __init__(self, qr_code_image):
         try:
@@ -42,16 +76,105 @@ class QrCodeRead:
         if self.qr_code_version == 1:
             self.reset_module_dimensions_from_timing_patterns()
         else:
-            self.get_alignment_pattern_positions(space_value, pixel_value)
+            alignment_positions = QrCode.alignment_pattern_locations[self.qr_code_version]
+            self.get_alignment_pattern_positions(alignment_positions, space_value, pixel_value)
+            self.populate_sampling_grid(alignment_positions)
 
-        self.populate_sampling_grid(space_value, pixel_value)
+        self.sample_grid(space_value, pixel_value)
+        self.error_correction_level, self.mask_pattern = self.decode_format_information(space_value, pixel_value)
+        self.release_data_mask()
         a = 1
 
-    def populate_sampling_grid(self, space_value=0, pixel_value=1):
+    def release_data_mask(self):
         pass
+    
+    def decode_format_information(self, space_value=0, pixel_value=1):
+        info_part1 = self.sampling_grid[:6, 8]
+        info_part2 = self.sampling_grid[7:9, 8]
+        info_part3 = self.sampling_grid[8, 7]
+        info_part4 = self.sampling_grid[8, :6][::-1]
+        format_info = np.concatenate((info_part1, info_part2, np.array([info_part3]), info_part4))
+        format_info_string = ''.join([str(x) for x in format_info])[::-1]
+        old_string = format_info_string
+        data_bits, error_correction_bits = self.get_format_information_from_bit_string(format_info_string)
+        if len(data_bits) == 0:
+            info_part1 = self.sampling_grid[8, -8:][::-1]
+            info_part2 = self.sampling_grid[-7:, 8]
+            format_info = np.concatenate((info_part1, info_part2))
+            format_info_string = ''.join([str(x) for x in format_info])[::-1]
+            data_bits, error_correction_bits = self.get_format_information_from_bit_string(format_info_string)
+            if len(data_bits) == 0:
+                # TODO: Try reading mirror images of the QR Code and decoding format info from those
+                raise ValueError(f'Cannot decode format information from bit strings {old_string} or '
+                                 f'{format_info_string}')
+        error_correction_level = QrCode.error_correction_indicators.index(data_bits[:2])
+        mask_pattern = int(data_bits[2:], 2)
+        return error_correction_level, mask_pattern
 
-    def get_alignment_pattern_positions(self, space_value=0, pixel_value=1):
-        alignment_positions = QrCode.alignment_pattern_locations[self.qr_code_version]
+    def get_format_information_from_bit_string(self, string_to_find):
+        # Format information id encoded with a maximum Hamming distance of 7.  This allows up to 3 bits to differ
+        # when performing a lookup.  The aim is to find the bit string corresponding to the smallest Hamming number.
+        min_dist = 100
+        min_dist_string = -1
+        for bit_string in self.format_decoding_information.keys():
+            dist = sum(c1 != c2 for c1, c2 in zip(string_to_find, bit_string))     # get Hamming distance
+            if dist < min_dist:
+                min_dist = dist
+                min_dist_string = bit_string
+        if min_dist > 3:
+            return '', ''
+
+        return self.format_decoding_information[min_dist_string]
+
+    def sample_grid(self, space_value=0, pixel_value=1):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                pixel = self.sampling_grid[y, x]
+                sample = self.binary_image[pixel[1] - 1: pixel[1] + 2, pixel[0] - 1: pixel[0] + 2]
+                self.sampling_grid[y, x] = pixel_value if len(sample[sample == 1]) > 4 else space_value
+        self.sampling_grid = self.sampling_grid[:, :, 0]
+
+    def populate_sampling_grid(self, alignment_positions):
+        resolutions = self.get_resolutions_for_alignment_patterns(alignment_positions)
+        self.use_resolutions_to_populate_sampling_grid(alignment_positions, resolutions)
+
+    def use_resolutions_to_populate_sampling_grid(self, alignment_positions, resolutions):
+        alignment_boundary = (alignment_positions[1] - alignment_positions[0]) // 2
+        for yi, y in enumerate(alignment_positions):
+            min_y = -7 if yi == 0 else -alignment_boundary
+            max_y = 6 if y == alignment_positions[-1] else alignment_boundary
+            for yy in range(min_y + 1, max_y + 1):
+                curr_y = alignment_positions[yi] + yy
+                for xi, x in enumerate(alignment_positions):
+                    min_x = -7 if xi == 0 else -alignment_boundary
+                    max_x = 6 if x == alignment_positions[-1] else alignment_boundary
+                    curr_alignment_pos = self.sampling_grid[alignment_positions[yi], alignment_positions[xi]]
+                    for xx in range(min_x + 1, max_x + 1):
+                        curr_x = alignment_positions[xi] + xx
+                        self.sampling_grid[curr_y, curr_x] = np.add(curr_alignment_pos,
+                                                                    [int(xx * resolutions[yi][xi][0]),
+                                                                     int(yy * resolutions[yi][xi][1])])
+
+    def get_resolutions_for_alignment_patterns(self, alignment_positions):
+        resolutions = []
+        for y in range(1, len(alignment_positions)):
+            row = []
+            for x in range(1, len(alignment_positions)):
+                res_x = (self.sampling_grid[alignment_positions[y], alignment_positions[x], 0] -
+                         self.sampling_grid[alignment_positions[y], alignment_positions[x - 1], 0]) / \
+                        (alignment_positions[x] - alignment_positions[x - 1])
+                res_y = (self.sampling_grid[alignment_positions[y], alignment_positions[x], 1] -
+                         self.sampling_grid[alignment_positions[y - 1], alignment_positions[x], 1]) / \
+                        (alignment_positions[y] - alignment_positions[y - 1])
+                row.append([res_x, res_y])
+            row.insert(0, row[0])  # extend x-resolutions for the first column of alignment patterns
+            # row.append(row[-1])     # extend x-resolutions for the last column of alignment patterns
+            resolutions.append(row)
+        resolutions.insert(0, resolutions[0])  # extend y-resolutions for the first row of alignment patterns
+        # resolutions.append(resolutions[-1])     # extend y-resolutions for the last row of alignment patterns
+        return resolutions
+
+    def get_alignment_pattern_positions(self, alignment_positions, space_value=0, pixel_value=1):
         self.width_in_modules = alignment_positions[-1] + 7
         self.height_in_modules = alignment_positions[-1] + 7
         self.initialise_sampling_grid()
@@ -59,16 +182,18 @@ class QrCodeRead:
         self.resolve_upper_left_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
         self.resolve_upper_right_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
         self.resolve_lower_left_alignment_patterns(alignment_positions, pattern_limit, space_value, pixel_value)
+        self.resolve_lower_right_alignment_patterns(alignment_positions, pattern_limit)
 
     def resolve_upper_left_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
         top_row_positions = [[self.upper_left_pattern[0] + 3 * self.module_width,
                               self.upper_left_pattern[1] + 3 * self.module_height]]
+        self.sampling_grid[6, 6] = top_row_positions[0]
         module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
         for x in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
             candidate = [module_diff_in_pixels + top_row_positions[x - 1][0], top_row_positions[x - 1][1]]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             top_row_positions.append(candidate)
-            self.sampling_grid[alignment_patterns[0]][alignment_patterns[x]] = candidate
+            self.sampling_grid[alignment_patterns[0], alignment_patterns[x]] = candidate
 
         left_row_positions = [[self.upper_left_pattern[0] + 3 * self.module_width,
                               self.upper_left_pattern[1] + 3 * self.module_height]]
@@ -77,21 +202,22 @@ class QrCodeRead:
             candidate = [left_row_positions[y - 1][0], module_diff_in_pixels + left_row_positions[y - 1][1]]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             left_row_positions.append(candidate)
-            self.sampling_grid[alignment_patterns[y]][alignment_patterns[0]] = candidate
+            self.sampling_grid[alignment_patterns[y], alignment_patterns[0]] = candidate
             for x in range(1, pattern_limit + 1):
                 candidate = [top_row_positions[x][0], left_row_positions[y][1]]
                 candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
-                self.sampling_grid[alignment_patterns[y]][alignment_patterns[x]] = candidate
+                self.sampling_grid[alignment_patterns[y], alignment_patterns[x]] = candidate
 
     def resolve_upper_right_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
         top_row_positions = [[self.upper_right_pattern[0] - 3 * self.module_width,
                               self.upper_right_pattern[1] + 3 * self.module_height]]
+        self.sampling_grid[6, -7] = top_row_positions[0]
         module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
         for x in range(len(alignment_patterns) - 2, pattern_limit, -1):   # ignore last element for same reason
             candidate = [top_row_positions[0][0] - module_diff_in_pixels, top_row_positions[0][1]]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             top_row_positions.insert(0, candidate)
-            self.sampling_grid[alignment_patterns[0]][alignment_patterns[x]] = candidate
+            self.sampling_grid[alignment_patterns[0], alignment_patterns[x]] = candidate
 
         right_row_positions = [[self.upper_right_pattern[0] - 3 * self.module_width,
                                 self.upper_right_pattern[1] + 3 * self.module_height]]
@@ -100,21 +226,22 @@ class QrCodeRead:
             candidate = [right_row_positions[y - 1][0], module_diff_in_pixels + right_row_positions[y - 1][1]]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             right_row_positions.append(candidate)
-            self.sampling_grid[alignment_patterns[y]][alignment_patterns[-1]] = candidate
+            self.sampling_grid[alignment_patterns[y], alignment_patterns[-1]] = candidate
             for x in range(1, pattern_limit):
                 candidate = [top_row_positions[-1 - x][0], right_row_positions[y][1]]
                 candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
-                self.sampling_grid[alignment_patterns[y]][alignment_patterns[-1 - x]] = candidate
+                self.sampling_grid[alignment_patterns[y], alignment_patterns[-1 - x]] = candidate
 
     def resolve_lower_left_alignment_patterns(self, alignment_patterns, pattern_limit, space_value=0, pixel_value=1):
         bottom_row_positions = [[self.lower_left_pattern[0] + 3 * self.module_width,
                                  self.lower_left_pattern[1] - 3 * self.module_height]]
+        self.sampling_grid[-7, 6] = bottom_row_positions[0]
         module_diff_in_pixels = (alignment_patterns[1] - alignment_patterns[0]) * self.module_width
         for x in range(1, pattern_limit + 1):   # ignore first element along top row, since it will be a finder pattern
             candidate = [module_diff_in_pixels + bottom_row_positions[x - 1][0], bottom_row_positions[x - 1][1]]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             bottom_row_positions.append(candidate)
-            self.sampling_grid[alignment_patterns[-1]][alignment_patterns[x]] = candidate
+            self.sampling_grid[alignment_patterns[-1], alignment_patterns[x]] = candidate
 
         left_row_positions = [[self.lower_left_pattern[0] + 3 * self.module_width,
                                self.lower_left_pattern[1] - 3 * self.module_height]]
@@ -123,11 +250,19 @@ class QrCodeRead:
             candidate = [left_row_positions[y - 1][0], left_row_positions[y - 1][1] - module_diff_in_pixels]
             candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
             left_row_positions.append(candidate)
-            self.sampling_grid[alignment_patterns[-1 - y]][alignment_patterns[0]] = candidate
+            self.sampling_grid[alignment_patterns[-1 - y], alignment_patterns[0]] = candidate
             for x in range(1, pattern_limit + 1):
                 candidate = [bottom_row_positions[x][0], left_row_positions[y][1]]
                 candidate = self.tweak_alignment_pattern_position(candidate, space_value, pixel_value)
-                self.sampling_grid[alignment_patterns[-1 - y]][alignment_patterns[x]] = candidate
+                self.sampling_grid[alignment_patterns[-1 - y], alignment_patterns[x]] = candidate
+
+    def resolve_lower_right_alignment_patterns(self, alignment_patterns, pattern_limit):
+        for y in range(pattern_limit + 1, len(alignment_patterns)):
+            for x in range(pattern_limit + 1, len(alignment_patterns)):
+                self.sampling_grid[alignment_patterns[y], alignment_patterns[x]] = [
+                    self.sampling_grid[alignment_patterns[y - 1], alignment_patterns[x], 0],
+                    self.sampling_grid[alignment_patterns[y], alignment_patterns[x - 1], 1]
+                    ]
 
     def tweak_alignment_pattern_position(self, candidate, space_value, pixel_value):
         if self.binary_image[candidate[1], candidate[0]] == space_value:
@@ -231,12 +366,17 @@ class QrCodeRead:
         self.module_height = round(np.average(groupings))
         self.height_in_modules = len(groupings) + 12
         self.initialise_sampling_grid()
+        for y in range(self.height_in_modules):
+            curr_y = self.upper_left_pattern[1] + (y - 3) * self.module_height
+            for x in range(self.width_in_modules):
+                self.sampling_grid[y, x] = [self.upper_left_pattern[0] + (x - 3) * self.module_width, curr_y]
 
     def initialise_sampling_grid(self):
-        self.sampling_grid = [[[] for _ in range(self.width_in_modules)] for _ in range(self.height_in_modules)]
-        self.sampling_grid[3][3] = self.upper_left_pattern
-        self.sampling_grid[3][-4] = self.upper_right_pattern
-        self.sampling_grid[-4][3] = self.lower_left_pattern
+        self.sampling_grid = np.array([[[None, None] for _ in range(self.width_in_modules)]
+                                       for _ in range(self.height_in_modules)])
+        self.sampling_grid[3, 3] = self.upper_left_pattern
+        self.sampling_grid[3, -4] = self.upper_right_pattern
+        self.sampling_grid[-4, 3] = self.lower_left_pattern
 
     def get_image_and_module_dimensions(self):
         self.upper_left_pattern = [p for p in self.finder_pattern_centers if p[0] < self.binary_image.shape[0] // 2 and
@@ -305,7 +445,7 @@ class QrCodeRead:
 
     @staticmethod
     def get_version_from_bit_string(string_to_find):
-        # Version information id encoded with a maximum Hamming distance of 8.  This allows up to 3 bits to differ
+        # Version information id encoded with a maximum Hamming distance of 7.  This allows up to 3 bits to differ
         # when performing a lookup.  The aim is to find the bit string corresponding to the smallest Hamming number.
         min_dist = 100
         min_dist_index = -1
@@ -461,5 +601,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('Untitled_v21.png')
+    qrr = QrCodeRead('Untitled4-2.png')
     qrr.read_qr_code()
