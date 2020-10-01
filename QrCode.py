@@ -1,4 +1,5 @@
 from Polynomials import Polynomials
+from copy import deepcopy
 
 
 class QrCode:
@@ -104,6 +105,8 @@ class QrCode:
     def __init__(self, error_correction_level=0, minimum_version=1, mask_pattern=-1):
         self.error_correction_level = error_correction_level
         self.minimum_version = minimum_version
+        self.width_in_modules = 21 + 4 * (minimum_version - 1)
+        self.height_in_modules = 21 + 4 * (minimum_version - 1)
         self.mask_pattern = mask_pattern
         self.ecc_info = self.ecc_word_and_block_info[error_correction_level][minimum_version]
         self.total_bits_required = self.ecc_info[0] * 8
@@ -199,6 +202,8 @@ class QrCode:
             bits_per_version = [ecc[0] * 8 for ecc in self.ecc_word_and_block_info[self.error_correction_level]]
             min_calc_ver = next(idx for idx, value in enumerate(bits_per_version) if value >= bit_string_length)
             self.minimum_version = self.minimum_version if self.minimum_version >= min_calc_ver else min_calc_ver
+            self.width_in_modules = 21 + 4 * (self.minimum_version - 1)
+            self.height_in_modules = 21 + 4 * (self.minimum_version - 1)
             self.ecc_info = self.ecc_word_and_block_info[self.error_correction_level][self.minimum_version]
             self.total_bits_required = self.ecc_info[0] * 8
             cci = self.calculate_character_count_indicator(input_data)
@@ -280,3 +285,203 @@ class QrCode:
                 r = r.rjust(8, '0')
                 result += r
         return result
+
+    def evaluate_condition_1(self, matrix):
+        penalties = self.count_condition1_row_penalties(matrix)
+
+        transposed = list(map(list, zip(*matrix)))
+        penalties += self.count_condition1_row_penalties(transposed)
+
+        return penalties
+
+    @staticmethod
+    def count_condition1_row_penalties(matrix):
+        penalties = 0
+        for row in matrix:
+            row_penalties = 0
+            curr_val = row[0]
+            val_count = 1
+            for col in range(1, len(matrix[0])):
+                if row[col] == curr_val:
+                    val_count += 1
+                else:
+                    if val_count >= 5:
+                        row_penalties += val_count - 2
+                    curr_val = row[col]
+                    val_count = 1
+            if val_count >= 5:
+                row_penalties += val_count - 2
+            penalties += row_penalties
+        return penalties
+
+    @staticmethod
+    def evaluate_condition_2(matrix):
+        penalties = 0
+        for row in range(1, len(matrix)):
+            for col in range(1, len(matrix[0])):
+                if matrix[row][col] == matrix[row - 1][col - 1] and\
+                   matrix[row][col] == matrix[row - 1][col] and\
+                   matrix[row][col] == matrix[row][col - 1]:
+                    penalties += 3
+        return penalties
+
+    def evaluate_condition_3(self, matrix):
+        penalties = self.count_condition3_row_penalties(matrix)
+
+        transposed = list(map(list, zip(*matrix)))
+        penalties += self.count_condition3_row_penalties(transposed)
+
+        return penalties
+
+    @staticmethod
+    def count_condition3_row_penalties(matrix):
+        penalties = 0
+        for row in range(len(matrix)):
+            for col in range(10, len(matrix[0])):
+                if matrix[row][col - 10: col + 1] == [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0] or \
+                        matrix[row][col - 10: col + 1] == [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]:
+                    penalties += 40
+        return penalties
+
+    def evaluate_condition_4(self, matrix):
+        num_dark_modules = sum(row.count(1) for row in matrix)
+        total_modules = self.width_in_modules * self.height_in_modules
+        percent_dark = 100 * num_dark_modules / total_modules
+        val1 = (percent_dark // 5) * 5
+        val2 = val1 + 5
+        val1 = abs(val1 - 50)
+        val2 = abs(val2 - 50)
+        penalties = 10 * min(val1 / 5, val2 / 5)
+
+        return int(penalties)
+
+    def evaluate_conditions(self, matrix, apply_mask=False):
+        matrix_copy = deepcopy(matrix)
+        for r, row in enumerate(matrix_copy):
+            for c in range(len(row)):
+                matrix_copy[r][c] = 1 if matrix_copy[r][c] == 2 else matrix_copy[r][c]
+                matrix_copy[r][c] = 0 if matrix_copy[r][c] == 3 else matrix_copy[r][c]
+                if apply_mask is False:
+                    matrix_copy[r][c] = 0 if matrix_copy[r][c] == 4 else matrix_copy[r][c]
+
+        if apply_mask:
+            return matrix_copy
+        else:
+            c1 = self.evaluate_condition_1(matrix_copy)
+            c2 = self.evaluate_condition_2(matrix_copy)
+            c3 = self.evaluate_condition_3(matrix_copy)
+            c4 = self.evaluate_condition_4(matrix_copy)
+            return c1 + c2 + c3 + c4
+
+    def evaluate_masks(self, array):
+        scores = []
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_0(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_1(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_2(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_3(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_4(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_5(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_6(matrix_copy))
+        matrix_copy = deepcopy(array)
+        scores.append(self.evaluate_mask_7(matrix_copy))
+        lowest = min(scores)
+        best_mask = scores.index(lowest)
+        return best_mask
+
+    def mask_bits(self, array, mask_number):
+        if mask_number == 0:
+            array = self.evaluate_mask_0(array, True)
+        elif mask_number == 1:
+            array = self.evaluate_mask_1(array, True)
+        elif mask_number == 2:
+            array = self.evaluate_mask_2(array, True)
+        elif mask_number == 3:
+            array = self.evaluate_mask_3(array, True)
+        elif mask_number == 4:
+            array = self.evaluate_mask_4(array, True)
+        elif mask_number == 5:
+            array = self.evaluate_mask_5(array, True)
+        elif mask_number == 6:
+            array = self.evaluate_mask_6(array, True)
+        else:
+            array = self.evaluate_mask_7(array, True)
+        return array
+
+    def evaluate_mask_0(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if (x + y) % 2 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_1(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if y % 2 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_2(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if x % 3 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_3(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if (x + y) % 3 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_4(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if ((x // 3) + (y // 2)) % 2 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_5(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if ((x * y) % 2) + ((x * y) % 3) == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_6(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if (((x * y) % 2) + ((x * y) % 3)) % 2 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)
+
+    def evaluate_mask_7(self, matrix, apply_mask=False):
+        for y in range(self.height_in_modules):
+            for x in range(self.width_in_modules):
+                if matrix[y][x] not in [2, 3, 4]:
+                    if (((x + y) % 2) + ((x * y) % 3)) % 2 == 0:
+                        matrix[y][x] = 1 - matrix[y][x]
+
+        return self.evaluate_conditions(matrix, apply_mask)

@@ -22,6 +22,7 @@ class QrCodeRead:
     height_in_modules = 0
     error_correction_level = -1
     mask_pattern = -1
+    qr = None
     format_decoding_information = {'101010000010010': ['00000', '0000000000'],
                                    '101000100100101': ['00001', '0100110111'],
                                    '101111001111100': ['00010', '1001101110'],
@@ -86,7 +87,8 @@ class QrCodeRead:
         a = 1
 
     def release_data_mask(self):
-        pass
+        self.qr = QrCode(self.error_correction_level, self.qr_code_version, self.mask_pattern)
+        self.sampling_grid = self.qr.mask_bits(self.sampling_grid, self.mask_pattern)
     
     def decode_format_information(self, space_value=0, pixel_value=1):
         info_part1 = self.sampling_grid[:6, 8]
@@ -344,8 +346,10 @@ class QrCodeRead:
     #     template2 = [[pixel_value for _ in range(self.module_width)] +
     #                  [space_value for _ in range(3 * self.module_width)] +
     #                  [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
-    #     template3 = [[pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
-    #                  [pixel_value for _ in range(self.module_width)] + [space_value for _ in range(self.module_width)] +
+    #     template3 = [[pixel_value for _ in range(self.module_width)] +
+    #                  [space_value for _ in range(self.module_width)] +
+    #                  [pixel_value for _ in range(self.module_width)] +
+    #                  [space_value for _ in range(self.module_width)] +
     #                  [pixel_value for _ in range(self.module_width)] for _ in range(self.module_height)]
     #     template = np.array(template1 + template2 + template3 + template2 + template1)
     #     return template
