@@ -407,12 +407,11 @@ class QrCodeDraw:
         self.matrix[(4 * self.qr_code.minimum_version) + 9][8] = 1
 
     def create_timing_patterns(self):
-        for x in range(6, self.width_in_modules - 8, 2):
-            self.matrix[6][x: x + 2] = [2, 3]
-        y_val = 2
-        for y in range(6, self.height_in_modules - 8):
-            self.matrix[y][6] = y_val
-            y_val = 5 - y_val
+        timing_value = 2
+        for i in range(6, self.height_in_modules - 8):
+            self.matrix[6][i] = timing_value
+            self.matrix[i][6] = timing_value
+            timing_value = 5 - timing_value
 
     def create_alignment_patterns(self):
         for y in self.qr_code.alignment_pattern_locations[self.qr_code.minimum_version]:
@@ -500,7 +499,7 @@ class QrCodeDraw:
 
 
 if __name__ == '__main__':
-    qr = QrCode(error_correction_level=3, minimum_version=21)
+    qr = QrCode(error_correction_level=3, minimum_version=1)
     qr.generate('Ratio of circle circumference to diameter (C/D) π = 3.141592653589793238462643383279....')
     qr_draw = QrCodeDraw(qr)
     qr_draw.draw()

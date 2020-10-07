@@ -23,6 +23,7 @@ class QrCodeRead:
     error_correction_level = -1
     mask_pattern = -1
     qr = None
+    bit_stream = None
     format_decoding_information = {'101010000010010': ['00000', '0000000000'],
                                    '101000100100101': ['00001', '0100110111'],
                                    '101111001111100': ['00010', '1001101110'],
@@ -83,13 +84,106 @@ class QrCodeRead:
 
         self.sample_grid(space_value, pixel_value)
         self.error_correction_level, self.mask_pattern = self.decode_format_information(space_value, pixel_value)
-        self.release_data_mask()
+        self.qr = QrCode(self.error_correction_level, self.qr_code_version, self.mask_pattern)
+        self.mask_out_functional_areas()
+        self.sampling_grid = self.qr.mask_bits(self.sampling_grid, self.mask_pattern, False)
+        self.read_grid()
         a = 1
 
-    def release_data_mask(self):
-        self.qr = QrCode(self.error_correction_level, self.qr_code_version, self.mask_pattern)
-        self.sampling_grid = self.qr.mask_bits(self.sampling_grid, self.mask_pattern)
-    
+    def read_grid(self):
+        ecc_info = QrCode.ecc_word_and_block_info[self.error_correction_level][self.qr_code_version]
+        self.get_data_bits()
+
+    def mask_out_functional_areas(self):
+        self.mask_out_finder_patterns()
+        self.mask_out_alignment_patterns()
+        self.mask_out_timing_patterns()
+        self.mask_out_reserved_areas()
+
+    def mask_out_finder_patterns(self):
+        template = np.array([[2, 2, 2, 2, 2, 2, 2, 3],
+                             [2, 3, 3, 3, 3, 3, 2, 3],
+                             [2, 3, 2, 2, 2, 3, 2, 3],
+                             [2, 3, 2, 2, 2, 3, 2, 3],
+                             [2, 3, 2, 2, 2, 3, 2, 3],
+                             [2, 3, 3, 3, 3, 3, 2, 3],
+                             [2, 2, 2, 2, 2, 2, 2, 3],
+                             [3, 3, 3, 3, 3, 3, 3, 3]])
+        self.sampling_grid[:8, :8] = template
+        self.sampling_grid[:8, -8:] = np.flip(template, axis=1)
+        self.sampling_grid[-8:, :8] = np.flip(template, axis=0)
+
+    def mask_out_alignment_patterns(self):
+        template = np.array([[2, 2, 2, 2, 2],
+                             [2, 3, 3, 3, 2],
+                             [2, 3, 2, 3, 2],
+                             [2, 3, 3, 3, 2],
+                             [2, 2, 2, 2, 2]])
+        for y in self.qr.alignment_pattern_locations[self.qr.minimum_version]:
+            for x in self.qr.alignment_pattern_locations[self.qr.minimum_version]:
+                if any([any([c == 2 for c in b[x - 2: x + 3]]) for b in self.sampling_grid[y - 2: y + 3]]):
+                    continue
+                self.sampling_grid[y - 2: y + 3, x - 2: x + 3] = template
+
+    def mask_out_timing_patterns(self):
+        timing_value = 2
+        for i in range(6, self.height_in_modules - 8):
+            self.sampling_grid[6, i] = timing_value
+            self.sampling_grid[i, 6] = timing_value
+            timing_value = 5 - timing_value
+
+    def mask_out_reserved_areas(self):
+        self.mask_out_dark_module()
+        self.mask_out_format_information_areas()
+        self.mask_out_version_information_areas()
+
+    def mask_out_version_information_areas(self):
+        if self.qr.minimum_version < 7:
+            return
+
+        self.sampling_grid[:6, -11: -8] = 4
+        self.sampling_grid[-11: -8, :6] = 4
+
+    def mask_out_format_information_areas(self):
+        self.sampling_grid[8, :9] = 4
+        self.sampling_grid[:9, 8] = 4
+        self.sampling_grid[8, -8:] = 4
+        self.sampling_grid[-8:, 8] = 4
+
+    def mask_out_dark_module(self):
+        self.sampling_grid[(4 * self.qr.minimum_version) + 9, 8] = 4
+
+    def get_data_bits(self):
+        self.bit_stream = []
+        x = self.qr.width_in_modules - 1
+        y = self.qr.height_in_modules - 1
+        while x >= 0:
+            while y >= 0:
+                x = self.update_matrix_cell_pair(x, y)
+                y -= 1
+            x -= 2
+            if x == 6:
+                x -= 1
+            y = 0
+            if x < 0:
+                break
+            while y < self.height_in_modules:
+                x = self.update_matrix_cell_pair(x, y)
+                y += 1
+            x -= 2
+            if x == 6:
+                x -= 1
+            y = self.height_in_modules - 1
+
+    def update_matrix_cell_pair(self, x, y):
+        if self.sampling_grid[y][x] not in [2, 3, 4]:
+            self.bit_stream.append(self.sampling_grid[y][x])
+        x -= 1
+        if self.sampling_grid[y][x] not in [2, 3, 4]:
+            self.bit_stream.append(self.sampling_grid[y][x])
+        x += 1
+        return x
+
     def decode_format_information(self, space_value=0, pixel_value=1):
         info_part1 = self.sampling_grid[:6, 8]
         info_part2 = self.sampling_grid[7:9, 8]
@@ -605,5 +699,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('Untitled4-2.png')
+    qrr = QrCodeRead('Pi_ecc_3_min_v1.png')
     qrr.read_qr_code()

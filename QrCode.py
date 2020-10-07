@@ -395,93 +395,93 @@ class QrCode:
         best_mask = scores.index(lowest)
         return best_mask
 
-    def mask_bits(self, array, mask_number):
+    def mask_bits(self, array, mask_number, writing=True):
         if mask_number == 0:
-            array = self.evaluate_mask_0(array, True)
+            array = self.evaluate_mask_0(array, True, writing)
         elif mask_number == 1:
-            array = self.evaluate_mask_1(array, True)
+            array = self.evaluate_mask_1(array, True, writing)
         elif mask_number == 2:
-            array = self.evaluate_mask_2(array, True)
+            array = self.evaluate_mask_2(array, True, writing)
         elif mask_number == 3:
-            array = self.evaluate_mask_3(array, True)
+            array = self.evaluate_mask_3(array, True, writing)
         elif mask_number == 4:
-            array = self.evaluate_mask_4(array, True)
+            array = self.evaluate_mask_4(array, True, writing)
         elif mask_number == 5:
-            array = self.evaluate_mask_5(array, True)
+            array = self.evaluate_mask_5(array, True, writing)
         elif mask_number == 6:
-            array = self.evaluate_mask_6(array, True)
+            array = self.evaluate_mask_6(array, True, writing)
         else:
-            array = self.evaluate_mask_7(array, True)
+            array = self.evaluate_mask_7(array, True, writing)
         return array
 
-    def evaluate_mask_0(self, matrix, apply_mask=False):
+    def evaluate_mask_0(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if (x + y) % 2 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_1(self, matrix, apply_mask=False):
+    def evaluate_mask_1(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if y % 2 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_2(self, matrix, apply_mask=False):
+    def evaluate_mask_2(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if x % 3 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_3(self, matrix, apply_mask=False):
+    def evaluate_mask_3(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if (x + y) % 3 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_4(self, matrix, apply_mask=False):
+    def evaluate_mask_4(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if ((x // 3) + (y // 2)) % 2 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_5(self, matrix, apply_mask=False):
+    def evaluate_mask_5(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if ((x * y) % 2) + ((x * y) % 3) == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_6(self, matrix, apply_mask=False):
+    def evaluate_mask_6(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if (((x * y) % 2) + ((x * y) % 3)) % 2 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
 
-    def evaluate_mask_7(self, matrix, apply_mask=False):
+    def evaluate_mask_7(self, matrix, apply_mask=False, writing=True):
         for y in range(self.height_in_modules):
             for x in range(self.width_in_modules):
                 if matrix[y][x] not in [2, 3, 4]:
                     if (((x + y) % 2) + ((x * y) % 3)) % 2 == 0:
                         matrix[y][x] = 1 - matrix[y][x]
 
-        return self.evaluate_conditions(matrix, apply_mask)
+        return self.evaluate_conditions(matrix, apply_mask) if writing else matrix
