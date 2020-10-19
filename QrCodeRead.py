@@ -24,6 +24,9 @@ class QrCodeRead:
     mask_pattern = -1
     qr = None
     bit_stream = None
+    byte_stream = None
+    p = 0
+    ckr = []
     format_decoding_information = {'101010000010010': ['00000', '0000000000'],
                                    '101000100100101': ['00001', '0100110111'],
                                    '101111001111100': ['00010', '1001101110'],
@@ -56,6 +59,75 @@ class QrCodeRead:
                                    '010000110000011': ['11101', '0110010001'],
                                    '010111011011010': ['11110', '1011001000'],
                                    '010101111101101': ['11111', '1111111111']}
+    ckr_values = [
+        [],  # There is no version 0!
+        [[[26, 19, 2]], [[26, 16, 4]], [[26, 13, 6]], [[26, 9, 8]]],
+        [[[44, 34, 4]], [[44, 28, 8]], [[44, 22, 11]], [[44, 16, 14]]],
+        [[[70, 55, 7]], [[70, 44, 13]], [[35, 17, 9]], [[35, 13, 11]]],
+        [[[100, 80, 10]], [[50, 32, 9]], [[50, 24, 13]], [[25, 9, 8]]],
+        [[134, 108, 13], [[67, 43, 12]], [[33, 15, 9], [34, 16, 9]], [[33, 11, 11], [34, 12, 11]]],
+        [[[86, 68, 9]], [[43, 27, 8]], [[43, 19, 12]], [[43, 15, 14]]],
+        [[[98, 78, 10]], [[49, 31, 9]], [[32, 14, 9], [33, 15, 9]], [[39, 13, 13], [40, 14, 13]]],
+        [[[121, 97, 12]], [[60, 38, 11], [61, 39, 11]], [[40, 18, 11], [41, 19, 11]], [[40, 14, 13], [41, 15, 13]]],
+        [[[146, 116, 15]], [[58, 36, 11], [59, 37, 11]], [[36, 16, 10], [37, 17, 10]], [[36, 12, 12], [37, 13, 12]]],
+        [[[86, 68, 9], [87, 69, 9]], [[69, 43, 13], [70, 44, 13]], [[43, 19, 12], [44, 20, 12]],
+         [[43, 15, 14], [44, 16, 14]]],
+        [[[101, 81, 10]], [[80, 50, 15], [81, 51, 15]], [[50, 22, 14], [51, 23, 14]], [[36, 12, 12], [37, 13, 12]]],
+        [[[116, 92, 12], [117, 93, 12]], [[58, 36, 11], [59, 37, 11]], [[46, 20, 13], [47, 21, 13]],
+         [[42, 14, 14], [43, 15, 14]]],
+        [[[133, 107, 13]], [[59, 37, 11], [60, 38, 11]], [[44, 20, 12], [45, 21, 12]], [[33, 11, 11], [34, 12, 11]]],
+        [[[145, 115, 15], [146, 116, 15]], [[64, 40, 12], [65, 41, 12]], [[36, 16, 10], [37, 17, 10]],
+         [[36, 12, 12], [37, 13, 12]]],
+        [[[109, 87, 11], [110, 88, 11]], [[65, 41, 12], [66, 42, 12]], [[54, 24, 15], [55, 25, 15]],
+         [[36, 12, 12], [37, 13, 12]]],
+        [[[122, 98, 12], [123, 99, 12]], [[73, 45, 14], [74, 46, 14]], [[43, 19, 12], [44, 20, 12]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[135, 107, 14], [136, 108, 14]], [[74, 46, 14], [75, 47, 14]], [[50, 22, 14], [51, 23, 14]],
+         [[42, 14, 14], [43, 15, 14]]],
+        [[[150, 120, 15], [151, 121, 15]], [[69, 43, 13], [70, 44, 13]], [[50, 22, 14], [51, 23, 14]],
+         [[42, 14, 14], [43, 15, 14]]],
+        [[[141, 113, 14], [142, 114, 14]], [[70, 44, 13], [71, 45, 13]], [[47, 21, 13], [48, 22, 13]],
+         [[39, 13, 13], [40, 14, 13]]],
+        [[[135, 107, 14], [136, 108, 14]], [[67, 41, 13, ], [68, 42, 13]], [[54, 24, 15], [55, 25, 15]],
+         [[43, 15, 14], [44, 16, 14]]],
+        [[[144, 116, 14], [145, 117, 14]], [[68, 42, 13]], [[50, 22, 14], [51, 23, 14]], [[46, 16, 15], [47, 17, 15]]],
+        [[[139, 111, 14], [140, 112, 14]], [[74, 46, 14]], [[54, 24, 15], [55, 25, 15]], [[37, 13, 12]]],
+        [[[151, 121, 15], [152, 122, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[147, 117, 15], [148, 118, 15]], [[73, 45, 14], [74, 46, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[46, 16, 15], [47, 17, 15]]],
+        [[[132, 106, 13], [133, 107, 13]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[142, 114, 14], [143, 115, 14]], [[74, 46, 14], [75, 47, 14]], [[50, 22, 14], [51, 23, 14]],
+         [[46, 16, 15], [47, 17, 15]]],
+        [[[152, 122, 15], [153, 123, 15]], [[73, 45, 14], [74, 46, 14]], [[53, 23, 15], [54, 24, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[147, 117, 15], [148, 118, 15]], [[73, 45, 14], [74, 46, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[146, 116, 15], [147, 117, 15]], [[73, 45, 14], [74, 46, 14]], [[53, 23, 15], [54, 24, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[145, 115, 15], [146, 116, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[145, 115, 15], [146, 116, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[145, 115, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]], [[45, 15, 15], [46, 16, 15]]],
+        [[[145, 115, 15], [146, 116, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[145, 115, 15], [146, 116, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[46, 16, 15], [47, 17, 15]]],
+        [[[151, 121, 15], [152, 122, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[151, 121, 15], [152, 122, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[152, 122, 15], [153, 123, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[152, 122, 15], [153, 123, 15]], [[74, 46, 14], [75, 47, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[147, 117, 15], [148, 118, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]],
+        [[[148, 118, 15], [149, 119, 15]], [[75, 47, 14], [76, 48, 14]], [[54, 24, 15], [55, 25, 15]],
+         [[45, 15, 15], [46, 16, 15]]]
+    ]
 
     def __init__(self, qr_code_image):
         try:
@@ -83,16 +155,95 @@ class QrCodeRead:
             self.populate_sampling_grid(alignment_positions)
 
         self.sample_grid(space_value, pixel_value)
-        self.error_correction_level, self.mask_pattern = self.decode_format_information(space_value, pixel_value)
+        self.error_correction_level, self.mask_pattern = self.decode_format_information(space_value)
         self.qr = QrCode(self.error_correction_level, self.qr_code_version, self.mask_pattern)
+        self.calculate_value_of_p()
         self.mask_out_functional_areas()
         self.sampling_grid = self.qr.mask_bits(self.sampling_grid, self.mask_pattern, False)
         self.read_grid()
         a = 1
 
     def read_grid(self):
-        ecc_info = QrCode.ecc_word_and_block_info[self.error_correction_level][self.qr_code_version]
         self.get_data_bits()
+        self.translate_bits_to_byte_values()
+        self.reverse_interleave()
+
+    def reverse_interleave(self):
+        ecc_info = QrCode.ecc_word_and_block_info[self.error_correction_level][self.qr_code_version]
+        ecc_block_length = ecc_info[1]
+        block1_rows = ecc_info[2]
+        block1_length = ecc_info[3]
+        block2_rows = ecc_info[4]
+        block2_length = ecc_info[5]
+        idx = 0
+        block1, block2, idx = self.process_interleaved_blocks(block1_length, block1_rows,
+                                                              block2_length, block2_rows, idx)
+        for i in range(block1_length, block2_length):
+            for j in range(block2_rows):
+                block2[j][i] = self.byte_stream[idx]
+                idx += 1
+
+        ecc_block1, ecc_block2, idx = self.process_interleaved_blocks(ecc_block_length, block1_rows,
+                                                                      ecc_block_length, block2_rows, idx)
+
+        # TODO: Something with rebuilding bytes using the error correction codes goes here
+        ckr_temp = self.ckr_values[self.qr_code_version][self.error_correction_level]
+        temp = [block1_rows, block2_rows]
+        curr_blocks = [block1, block2]
+        for i, vals in enumerate(ckr_temp):
+            for _ in range(temp[i]):
+                self.ckr.append(vals)
+
+            curr_block = curr_blocks[i]
+
+            n = vals[0] - vals[1] - vals[2]
+            syndromes = []
+            for j in range(n):
+                syndromes[j] = 0
+                for k in range(vals[0]):
+                    syndromes[j] += 1
+
+        self.byte_stream = []
+        for row in block1:
+            self.byte_stream.extend(row)
+        for row in block2:
+            self.byte_stream.extend(row)
+        for row in ecc_block1:
+            self.byte_stream.extend(row)
+        for row in ecc_block2:
+            self.byte_stream.extend(row)
+
+    def process_interleaved_blocks(self, block1_length, block1_rows, block2_length, block2_rows, idx):
+        block1 = [[0 for _ in range(block1_length)] for _ in range(block1_rows)]
+        block2 = [[0 for _ in range(block2_length)] for _ in range(block2_rows)]
+        for i in range(block1_length):
+            for j in range(block1_rows):
+                block1[j][i] = self.byte_stream[idx]
+                idx += 1
+            for j in range(block2_rows):
+                block2[j][i] = self.byte_stream[idx]
+                idx += 1
+        return block1, block2, idx
+
+    def translate_bits_to_byte_values(self):
+        self.byte_stream = []
+        for idx in range(0, len(self.bit_stream), 8):
+            temp = int(''.join([str(x) for x in self.bit_stream[idx: idx + 8]]), 2)
+            self.byte_stream.append(temp)
+
+    def calculate_value_of_p(self):
+        if self.qr_code_version < 4:
+            if self.qr_code_version == 3 and self.error_correction_level == 0:
+                self.p = 1
+            elif self.qr_code_version == 2 and self.error_correction_level == 0:
+                self.p = 2
+            else:
+                if self.error_correction_level == 0:
+                    self.p = 3
+                elif self.error_correction_level == 1:
+                    self.p = 2
+                else:
+                    self.p = 1
 
     def mask_out_functional_areas(self):
         self.mask_out_finder_patterns()
@@ -184,20 +335,20 @@ class QrCodeRead:
         x += 1
         return x
 
-    def decode_format_information(self, space_value=0, pixel_value=1):
+    def decode_format_information(self, space_value=0):
         info_part1 = self.sampling_grid[:6, 8]
         info_part2 = self.sampling_grid[7:9, 8]
         info_part3 = self.sampling_grid[8, 7]
         info_part4 = self.sampling_grid[8, :6][::-1]
         format_info = np.concatenate((info_part1, info_part2, np.array([info_part3]), info_part4))
-        format_info_string = ''.join([str(x) for x in format_info])[::-1]
+        format_info_string = ''.join([str(x - space_value) for x in format_info])[::-1]
         old_string = format_info_string
         data_bits, error_correction_bits = self.get_format_information_from_bit_string(format_info_string)
         if len(data_bits) == 0:
             info_part1 = self.sampling_grid[8, -8:][::-1]
             info_part2 = self.sampling_grid[-7:, 8]
             format_info = np.concatenate((info_part1, info_part2))
-            format_info_string = ''.join([str(x) for x in format_info])[::-1]
+            format_info_string = ''.join([str(x - space_value) for x in format_info])[::-1]
             data_bits, error_correction_bits = self.get_format_information_from_bit_string(format_info_string)
             if len(data_bits) == 0:
                 # TODO: Try reading mirror images of the QR Code and decoding format info from those
@@ -699,5 +850,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('Pi_ecc_3_min_v1.png')
+    qrr = QrCodeRead('qr_a_to_q_low_v1.png')  # Pi_ecc_3_min_v1.png')
     qrr.read_qr_code()
