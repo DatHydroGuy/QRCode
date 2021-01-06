@@ -27,7 +27,15 @@ class Polynomials:
         val1 = self.exponents[factor1]
         val2 = self.exponents[factor2]
         new_val = val1 ^ val2
-        return self.exponents.index(new_val)
+        return 0 if new_val == 0 else self.exponents.index(new_val)
+
+    def multiply_factors(self, factor1, factor2):
+        total = self.exponents[(self.exponents.index(factor1) + self.exponents.index(factor2)) % 255]
+
+        return total
+
+    def power_factors(self, factor1, factor2):
+        return self.exponents[(self.exponents.index(factor1) * factor2) % 255]
 
     def generator(self, number_of_terms, in_alpha_format=True):
         alpha_polynomial = [0, 0]    # our initial representation of αx + α
@@ -42,7 +50,7 @@ class Polynomials:
                 low.append(new_low)
             alpha_polynomial = [high[0]] + [self.add_factors(low[k], high[k + 1]) for k in range(len(high) - 1)] +\
                                [low[-1]]
-        return alpha_polynomial if in_alpha_format else self.convert_alpha_to_polynomial(alpha_polynomial)
+        return alpha_polynomial if in_alpha_format else self.convert_alpha_to_list(alpha_polynomial)
 
     def convert_value_to_alpha(self, value):
         return self.exponents.index(value)
@@ -50,18 +58,29 @@ class Polynomials:
     def convert_alpha_to_value(self, value):
         return self.exponents[value]
 
-    def convert_polynomial_to_alpha(self, polynomial):
-        return [self.convert_value_to_alpha(i) for i in polynomial]
+    def convert_list_to_alpha(self, in_list):
+        return [self.convert_value_to_alpha(i) for i in in_list]
 
-    def convert_alpha_to_polynomial(self, alpha_polynomial):
-        return [self.convert_alpha_to_value(i) for i in alpha_polynomial]
+    def convert_alpha_to_list(self, alpha_list):
+        return [self.convert_alpha_to_value(i) for i in alpha_list]
+
+    def evaluate_polynomial(self, polynomial):
+        pass
+
+    def evaluate_alpha_polynomial(self, polynomial, value_to_evaluate=0):
+        total = polynomial[0]
+        for coefficient in polynomial[1:]:
+            multiplied = self.multiply_factors(total, value_to_evaluate)
+            subtotal = multiplied ^ coefficient
+            total = self.fix_exponent(subtotal)
+        return total
 
     def divide_polynomials(self, dividend, divisor):
         num_divisor_poly_terms = len(divisor)
         num_dividend_poly_terms = len(dividend)
 
         result = [x for x in dividend] + [0 for _ in range(num_divisor_poly_terms - 1)]
-        divisor_alpha = self.convert_polynomial_to_alpha(divisor)
+        divisor_alpha = self.convert_list_to_alpha(divisor)
         multiply_poly = [x for x in divisor_alpha] + [0 for _ in range(num_dividend_poly_terms - 1)]
         xor_poly = [x for x in result]
 

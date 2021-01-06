@@ -166,7 +166,9 @@ class QrCodeRead:
     def read_grid(self):
         self.get_data_bits()
         self.translate_bits_to_byte_values()
-        self.reverse_interleave()
+        curr_blocks, rows_in_block, ckr_temp, ecc_blocks = self.reverse_interleave()
+        self.calculate_syndromes(curr_blocks, rows_in_block, ckr_temp, ecc_blocks)
+        self.decode_byte_stream()
 
     def reverse_interleave(self):
         ecc_info = QrCode.ecc_word_and_block_info[self.error_correction_level][self.qr_code_version]
@@ -183,35 +185,72 @@ class QrCodeRead:
                 block2[j][i] = self.byte_stream[idx]
                 idx += 1
 
-        ecc_block1, ecc_block2, idx = self.process_interleaved_blocks(ecc_block_length, block1_rows,
-                                                                      ecc_block_length, block2_rows, idx)
+        ecc_block1, ecc_block2, _ = self.process_interleaved_blocks(ecc_block_length, block1_rows,
+                                                                    ecc_block_length, block2_rows, idx)
+        ecc_blocks = [ecc_block1, ecc_block2]
 
         # TODO: Something with rebuilding bytes using the error correction codes goes here
         ckr_temp = self.ckr_values[self.qr_code_version][self.error_correction_level]
-        temp = [block1_rows, block2_rows]
+        if len(ckr_temp) < 2:
+            ckr_temp.append([])
+        rows_in_block = [block1_rows, block2_rows]
         curr_blocks = [block1, block2]
-        for i, vals in enumerate(ckr_temp):
-            for _ in range(temp[i]):
-                self.ckr.append(vals)
+        return curr_blocks, rows_in_block, ckr_temp, ecc_blocks
 
-            curr_block = curr_blocks[i]
-
-            n = vals[0] - vals[1] - vals[2]
-            syndromes = []
-            for j in range(n):
-                syndromes[j] = 0
-                for k in range(vals[0]):
-                    syndromes[j] += 1
-
+    def calculate_syndromes(self, curr_blocks, rows_in_block, ckr_temp, ecc_blocks):
         self.byte_stream = []
-        for row in block1:
-            self.byte_stream.extend(row)
-        for row in block2:
-            self.byte_stream.extend(row)
-        for row in ecc_block1:
-            self.byte_stream.extend(row)
-        for row in ecc_block2:
-            self.byte_stream.extend(row)
+        for ii, aa in enumerate(rows_in_block):
+            ckr = ckr_temp[ii]
+            for jj, block_row in enumerate(curr_blocks[ii]):
+                # block_row[0] -= 1       # TODO: REMOVE THIS LINE WHEN DONE!!!
+                c, k, r = ckr
+                num_syndromes = c - k - self.p
+                encoded = block_row + ecc_blocks[ii][jj]
+                syndromes = self.get_syndromes_for_block_row(encoded, num_syndromes)
+                if all([s == 0 for s in syndromes]):
+                    self.byte_stream.extend(block_row)
+                    continue
+
+                # TODO: If any syndromes are non-zero, we need to find the position of the error(s), the size(s), and
+                #  apply correction(s)
+                self.find_errors()
+
+    def decode_byte_stream(self):
+        self.bit_stream = ''
+        for byte_value in self.byte_stream:
+            self.bit_stream += f'{byte_value:08b}'
+        mode = self.bit_stream[:4]
+        self.qr.encoder = [k for k, v in self.qr.encoding.items() if v == mode][0]
+        if 1 <= self.qr_code_version <= 9:
+            cci_length = 10 if self.qr.encoder == 'numeric' else 9 if self.qr.encoder == 'alphanumeric' else 8
+        elif 10 <= self.qr_code_version <= 26:
+            cci_length = 12 if self.qr.encoder == 'numeric' else 11 if self.qr.encoder == 'alphanumeric' else 16
+        elif 27 <= self.qr_code_version <= 40:
+            cci_length = 14 if self.qr.encoder == 'numeric' else 13 if self.qr.encoder == 'alphanumeric' else 16
+        else:
+            raise ValueError(f'Invalid version number: {self.qr_code_version}')
+        cci = self.bit_stream[4:4 + cci_length]
+        a = 1
+
+        # for row in block1:
+        #     self.byte_stream.extend(row)
+        # for row in block2:
+        #     self.byte_stream.extend(row)
+        # for row in ecc_block1:
+        #     self.byte_stream.extend(row)
+        # for row in ecc_block2:
+        #     self.byte_stream.extend(row)
+
+    def find_errors(self):
+        pass
+
+    def get_syndromes_for_block_row(self, block_row, num_syndromes):
+        syndromes = []
+        for s in range(num_syndromes):
+            evaluation_point = self.qr.polynomial_manager.power_factors(2, s)
+            test = self.qr.polynomial_manager.evaluate_alpha_polynomial(block_row, evaluation_point)
+            syndromes.append(test)
+        return syndromes
 
     def process_interleaved_blocks(self, block1_length, block1_rows, block2_length, block2_rows, idx):
         block1 = [[0 for _ in range(block1_length)] for _ in range(block1_rows)]
@@ -850,5 +889,5 @@ class QrCodeRead:
 
 
 if __name__ == '__main__':
-    qrr = QrCodeRead('qr_a_to_q_low_v1.png')  # Pi_ecc_3_min_v1.png')
+    qrr = QrCodeRead('123.png')  # Pi_ecc_3_min_v1.png')
     qrr.read_qr_code()
